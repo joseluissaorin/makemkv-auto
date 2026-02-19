@@ -11,17 +11,19 @@ from pathlib import Path
 from typing import Optional
 
 from makemkv_auto.config import Config
+from makemkv_auto.detector import (
+    ContentType,
+    SmartContentDetector,
+    TitleInfo as DetectorTitleInfo,
+)
 from makemkv_auto.exceptions import DiscError, NoDiscError, RipError
 from makemkv_auto.logger import get_logger
 
 logger = get_logger(__name__)
 
 
-class ContentType(Enum):
-    """Content type enumeration."""
-    MOVIE = "movie"
-    TV_SHOW = "tvshow"
-    UNKNOWN = "unknown"
+# Re-export for backward compatibility
+__all__ = ['ContentType', 'TitleInfo', 'DiscInfo', 'DiscAnalyzer', 'Ripper']
 
 
 @dataclass
@@ -187,32 +189,27 @@ class DiscAnalyzer:
         return titles
     
     def _detect_content_type(self, titles: list[TitleInfo], disc_name: str) -> tuple[ContentType, str]:
-        """Detect if disc contains movie or TV show content."""
-        episodes = 0
-        movies = 0
+        """Detect if disc contains movie or TV show content using smart detector."""
+        # Convert TitleInfo to detector's format
+        detector_titles = [
+            DetectorTitleInfo(
+                index=t.index,
+                duration=t.duration,
+                size_bytes=t.size_bytes,
+                content_type=t.content_type
+            )
+            for t in titles
+        ]
         
-        for title in titles:
-            if title.content_type == "episode":
-                episodes += 1
-            elif title.content_type == "movie":
-                movies += 1
+        # Use smart detector
+        detector = SmartContentDetector(
+            min_episode_duration=self.config.detection.min_episode_duration,
+            max_episode_duration=self.config.detection.max_episode_duration,
+            min_movie_duration=self.config.detection.min_movie_duration
+        )
         
-        # Check disc name for TV indicators
-        name_lower = disc_name.lower()
-        tv_indicators = ['season', 'series', 'episodes', 'temporada', 'episodios', 'disc']
-        has_tv_indicator = any(indicator in name_lower for indicator in tv_indicators)
-        
-        # Determine type
-        if episodes >= 2 and movies <= 1:
-            return ContentType.TV_SHOW, "high"
-        elif movies >= 1 and episodes <= 1:
-            return ContentType.MOVIE, "high"
-        elif has_tv_indicator:
-            return ContentType.TV_SHOW, "high"
-        elif movies >= 1:
-            return ContentType.MOVIE, "medium"
-        else:
-            return ContentType.UNKNOWN, "low"
+        result = detector.detect(detector_titles, disc_name)
+        return result.content_type, result.confidence
     
     def _sanitize_name(self, name: str) -> str:
         """Sanitize disc name for use as directory name."""
