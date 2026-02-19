@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Logs — MakeMKV Auto{% endblock %}
+
+{% block content %}
+
+<section class="status-section">
+    
+    <div class="status-header">
+        <div class="status-title">System Logs</div>
+        <div class="status-value">Recent Activity</div>
+    </div>
+
+</section>
+
+
+<section class="secondary-section">
+    
+    <div class="logs-container" id="logs-container">
+        <div class="loading">Loading...</div>
+    </div>
+
+</section>
+
+
+<div class="btn-group">
+    <a href="/" class="btn">← Back to Status</a>
+</div>
+
+{% endblock %}
+
+
+{% block extra_js %}
+<script>
+    async function loadLogs() {
+        try {
+            const response = await fetch('/api/logs?lines=100');
+            const data = await response.json();
+            const container = document.getElementById('logs-container');
+            
+            if (data.logs && data.logs.length > 0) {
+                container.innerHTML = data.logs.map(line => 
+                    `<div class="log-entry">${line.replace(/\n$/, '')}</div>`
+                ).join('');
+            } else {
+                container.innerHTML = '<div class="loading">No logs available</div>';
+            }
+        } catch (error) {
+            document.getElementById('logs-container').innerHTML = 
+                '<div class="loading">Failed to load logs</div>';
+        }
+    }
+    
+    loadLogs();
+    setInterval(loadLogs, 5000);
+</script>
+{% endblock %}

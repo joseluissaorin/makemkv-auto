@@ -1,0 +1,20 @@
+[Unit]
+Description=MakeMKV Auto Monitor - Disc insertion detection
+After=local-fs.target network.target
+
+[Service]
+Type=simple
+User=root
+Group=cdrom
+Environment="PYTHONUNBUFFERED=1"
+Environment="MKA_CONFIG=/etc/makemkv-auto/config.yaml"
+ExecStart=/usr/local/bin/makemkv-auto monitor
+ExecReload=/bin/kill -HUP $MAINPID
+KillMode=mixed
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

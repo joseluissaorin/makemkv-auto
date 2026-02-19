@@ -1,0 +1,17 @@
+[Unit]
+Description=MakeMKV Auto Web UI
+After=network.target
+Wants=makemkv-auto-monitor.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/usr/local/lib/python3.11/dist-packages/makemkv_auto
+ExecStart=/usr/local/bin/uvicorn makemkv_auto.web.app:app --host 0.0.0.0 --port 8766 --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

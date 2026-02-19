@@ -1,0 +1,7 @@
+[Unit]
+Description=MakeMKV Beta Key Update Service
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/makemkv-auto key update

@@ -1,0 +1,49 @@
+makemkv:
+  version: "1.18.3"
+  install_path: /usr/local
+
+paths:
+  base: /media/joseluis/DATOS_HDD/datos_samba
+  # movies and tv_shows will be automatically set based on base path
+  # movies: /media/joseluis/DATOS_HDD/datos_samba/Películas
+  # tv_shows: /media/joseluis/DATOS_HDD/datos_samba/Series
+  temp: /tmp/makemkv-auto
+  logs: /var/log/makemkv-auto
+
+devices:
+  primary: /dev/sr0
+  additional: []
+
+detection:
+  min_episode_duration: 18    # minutes
+  max_episode_duration: 70    # minutes
+  min_movie_duration: 75      # minutes
+  auto_eject: true
+  overwrite_existing: false
+
+output:
+  naming_pattern: "{title}"
+  create_nfo: false
+  min_length: 600             # seconds (10 minutes)
+
+logging:
+  level: INFO
+  max_size: 100MB
+  retention_days: 30
+  structured: false
+
+service:
+  check_interval: 5           # seconds
+  retry_count: 3
+  retry_delay: 10             # seconds
+
+web:
+  enabled: true               # Enable web UI
+  host: "0.0.0.0"            # Bind to all interfaces (use "127.0.0.1" for localhost only)
+  port: 8766                 # Port number (changed from 8765 due to conflict)
+  auto_refresh: 5            # Dashboard refresh interval in seconds
+  log_lines: 100             # Default number of log lines to show
+  auth:
+    enabled: false           # Enable HTTP basic authentication
+    username: "admin"
+    password: "changeme"     # Change this to a secure password

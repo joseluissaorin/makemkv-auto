@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="refresh" content="{{ refresh_interval | default(5) }}">
+    <title>{% block title %}MakeMKV Auto{% endblock %}</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-logo">
+            <span class="nav-logo-primary">MakeMKV</span>
+            <span class="nav-logo-secondary">Auto</span>
+        </a>
+        
+        <ul class="nav-links">
+            <li><a href="/" class="{% if request.url.path == '/' %}active{% endif %}">Status</a></li>
+            <li><a href="/logs" class="{% if request.url.path == '/logs' %}active{% endif %}">Logs</a></li>
+            <li><a href="/system" class="{% if request.url.path == '/system' %}active{% endif %}">System</a></li>
+        </ul>
+    </nav>
+
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <span>v1.0.0</span>
+        <span class="footer-divider">—</span>
+        <span>Refresh: {{ refresh_interval | default(5) }}s</span>
+    </footer>
+
+    <script>
+        document.querySelector('.nav-toggle')?.addEventListener('click', function() {
+            document.querySelector('.nav-links').classList.toggle('active');
+        });
+    </script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

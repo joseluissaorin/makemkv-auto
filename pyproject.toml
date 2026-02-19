@@ -1,0 +1,120 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "makemkv-auto"
+version = "1.0.0"
+description = "Automated MakeMKV disc ripper with intelligent TV/Movie detection"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "José Luis Saorín Ferrer", email = "joseluis@example.com"}
+]
+keywords = ["makemkv", "dvd", "bluray", "ripper", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Video",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "typer>=0.12.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "PyYAML>=6.0",
+    "rich>=13.0.0",
+    "structlog>=24.0.0",
+    "psutil>=5.9.0",
+    "requests>=2.31.0",
+    "python-daemon>=3.0.0",
+    "notify2>=0.3.1; platform_system=='Linux'",
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.23.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.6",
+    "aiofiles>=23.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+    "pre-commit>=3.4.0",
+]
+
+[project.scripts]
+makemkv-auto = "makemkv_auto.cli:app"
+mka = "makemkv_auto.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/makemkv-auto"
+Repository = "https://github.com/yourusername/makemkv-auto"
+Issues = "https://github.com/yourusername/makemkv-auto/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/makemkv_auto"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/systemd",
+    "/scripts",
+    "/config",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # Pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "SIM", # flake8-simplify
+]
+ignore = ["E501"]
+
+[tool.ruff.pydocstyle]
+convention = "google"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["src/makemkv_auto"]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+]

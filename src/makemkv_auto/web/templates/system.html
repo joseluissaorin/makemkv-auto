@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block title %}System — MakeMKV Auto{% endblock %}
+
+{% block content %}
+
+<section class="status-section">
+    
+    <div class="status-header">
+        <div class="status-title">System Information</div>
+        <div class="status-value">Configuration</div>
+    </div>
+
+</section>
+
+
+{% if disk_info and not disk_info.error %}
+<section class="secondary-section">
+    
+    <h2 class="section-title">Storage</h2>
+    
+    
+    <div class="progress-container">
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill" style="width: {{ disk_info.percent_used }}%"></div>
+        </div>
+        
+        <div class="progress-stats">
+            <span>{{ "%.1f" | format(disk_info.percent_used) }}% used</span>
+            <span>{{ "%.1f" | format(disk_info.free_gb) }} GB free</span>
+        </div>
+    </div>
+    
+    
+    <ul class="info-list">
+        <li class="info-item">
+            <span class="info-label">Path</span>
+            <span class="info-value">{{ disk_info.path }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">Total</span>
+            <span class="info-value">{{ "%.1f" | format(disk_info.total_gb) }} GB</span>
+        </li>
+    </ul>
+
+</section>
+{% endif %}
+
+
+{% if config %}
+<section class="secondary-section">
+    
+    <h2 class="section-title">Paths</h2>
+    
+    
+    <ul class="info-list">
+        <li class="info-item">
+            <span class="info-label">Base</span>
+            <span class="info-value">{{ config.paths.base }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">Movies</span>
+            <span class="info-value">{{ config.paths.movies or 'Not set' }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">TV Shows</span>
+            <span class="info-value">{{ config.paths.tv_shows or 'Not set' }}</span>
+        </li>
+    </ul>
+
+</section>
+
+
+<section class="secondary-section">
+    
+    <h2 class="section-title">Device</h2>
+    
+    
+    <ul class="info-list">
+        <li class="info-item">
+            <span class="info-label">Primary</span>
+            <span class="info-value">{{ config.devices.primary }}</span>
+        </li>
+    </ul>
+
+</section>
+
+
+<section class="secondary-section">
+    
+    <h2 class="section-title">Settings</h2>
+    
+    
+    <ul class="info-list">
+        <li class="info-item">
+            <span class="info-label">Auto Eject</span>
+            <span class="info-value">{{ 'Yes' if config.detection.auto_eject else 'No' }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">Overwrite</span>
+            <span class="info-value">{{ 'Yes' if config.detection.overwrite_existing else 'No' }}</span>
+        </li>
+    </ul>
+
+</section>
+{% endif %}
+
+
+<div class="btn-group">
+    <a href="/" class="btn">← Back to Status</a>
+</div>
+
+{% endblock %}

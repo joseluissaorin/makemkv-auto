@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}Status — MakeMKV Auto{% endblock %}
+
+{% block content %}
+
+<section class="status-section {% if state.status.value == 'ripping' %}status-ripping{% elif state.status.value == 'error' %}status-error{% else %}status-idle{% endif %}">
+    
+    <div class="status-header">
+        <div class="status-title">Current Status</div>
+        
+        <div class="status-value">{{ state.status.value | capitalize }}</div>
+    </div>
+    
+    {% if state.status.value == 'ripping' %}
+    
+    <div class="disc-info">
+        <div class="disc-label">Now Ripping</div>
+        
+        <div class="disc-name">{{ state.disc_name or 'Unknown' }}</div>
+        
+        <div class="disc-meta">{{ state.content_type or 'Unknown type' }} — {{ state.device }}</div>
+    </div>
+    
+    <div class="progress-container">
+        <div class="progress-bar-bg">
+            <div class="progress-bar-fill" style="width: {{ state.progress_percent }}%"></div>
+        </div>
+        
+        <div class="progress-stats">
+            <span>{{ "%.0f" | format(state.progress_percent) }}%</span>
+            <span>Title {{ state.current_title }} of {{ state.total_titles }}</span>
+        </div>
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-item">
+            <div class="stat-label">Duration</div>
+            <div class="stat-value">{{ state.format_duration() }}</div>
+        </div>
+        
+        <div class="stat-item">
+            <div class="stat-label">ETA</div>
+            <div class="stat-value">{{ state.format_eta() }}</div>
+        </div>
+        
+        <div class="stat-item">
+            <div class="stat-label">Device</div>
+            <div class="stat-value">{{ state.device }}</div>
+        </div>
+    </div>
+    
+    {% elif state.status.value == 'error' %}
+    
+    <div class="error-state">
+        <div class="error-message">{{ state.error_message or 'An error has occurred' }}</div>
+    </div>
+    
+    {% else %}
+    
+    <div class="idle-state">
+        <svg class="idle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="12" r="3" fill="currentColor"/>
+        </svg>
+        
+        <div class="idle-message">Waiting for disc</div>
+    </div>
+    
+    {% endif %}
+    
+    
+    <div class="btn-group">
+        <form action="/api/eject" method="post">
+            <button type="submit" class="btn">Eject Tray</button>
+        </form>
+        
+        <form action="/api/refresh" method="post">
+            <button type="submit" class="btn">Refresh</button>
+        </form>
+    </div>
+
+</section>
+
+
+{% if state.last_rip %}
+<section class="secondary-section">
+    
+    <div class="section-header">
+        <h2 class="section-title">Last Rip</h2>
+        
+        <span class="section-meta">{{ state.last_rip.completed_at[:10] if state.last_rip.completed_at else '' }}</span>
+    </div>
+    
+    
+    <ul class="info-list">
+        <li class="info-item">
+            <span class="info-label">Name</span>
+            <span class="info-value">{{ state.last_rip.name }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">Files</span>
+            <span class="info-value">{{ state.last_rip.file_count }}</span>
+        </li>
+        
+        <li class="info-item">
+            <span class="info-label">Size</span>
+            <span class="info-value">{{ "%.1f" | format(state.last_rip.total_size_mb) }} MB</span>
+        </li>
+    </ul>
+
+</section>
+{% endif %}
+
+
+<section class="secondary-section">
+    
+    <h2 class="section-title">Actions</h2>
+    
+    
+    <ul class="action-list">
+        <li class="action-item">
+            <a href="/logs" class="action-link">
+                <span class="action-name">View Logs</span>
+                <span class="action-arrow">→</span>
+            </a>
+        </li>
+        
+        <li class="action-item">
+            <a href="/system" class="action-link">
+                <span class="action-name">System Info</span>
+                <span class="action-arrow">→</span>
+            </a>
+        </li>
+    </ul>
+
+</section>
+
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    const lastStatus = sessionStorage.getItem('lastStatus');
+    const currentStatus = '{{ state.status.value }}';
+    
+    {% if state.status.value == 'idle' and state.last_rip %}
+    if (lastStatus === 'ripping') {
+        if (Notification.permission === "granted") {
+            new Notification("Rip Complete", {
+                body: "{{ state.last_rip.name }}"
+            });
+        }
+    }
+    {% endif %}
+    
+    sessionStorage.setItem('lastStatus', currentStatus);
+</script>
+{% endblock %}
