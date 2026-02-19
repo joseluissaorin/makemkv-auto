@@ -82,9 +82,19 @@ class DiscAnalyzer:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=60,
             )
-            return "drive" in result.stdout.lower()
+            # Check for DRV lines with actual disc data (non-empty name field)
+            # DRV:0,2,999,1,"drive_name","disc_name","/dev/sr0"
+            for line in result.stdout.split('\n'):
+                if line.startswith('DRV:'):
+                    parts = line.split('","')
+                    if len(parts) >= 3:
+                        # Check if disc name is present (not empty)
+                        disc_name = parts[1].strip('"')
+                        if disc_name:
+                            return True
+            return False
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError):
             return False
         except FileNotFoundError:
@@ -219,8 +229,8 @@ class Ripper:
     def __init__(self, config: Config) -> None:
         self.config = config
     
-    def rip_disc(self, disc_info: DiscInfo, output_path: Path) -> None:
-        """Rip disc to output directory."""
+    def rip_disc(self, disc_info: DiscInfo, output_path: Path, state_manager=None) -> None:
+        """Rip disc to output directory with optional progress tracking."""
         device = self.config.devices.primary
         output_path.mkdir(parents=True, exist_ok=True)
         
@@ -228,9 +238,8 @@ class Ripper:
         logger.info(f"Output: {output_path}")
         
         try:
-            # Run makemkvcon to rip all titles
-            # Use check=False to handle non-zero exit codes gracefully
-            result = subprocess.run(
+            # Run makemkvcon with real-time output parsing
+            process = subprocess.Popen(
                 [
                     "makemkvcon",
                     "mkv",
@@ -240,14 +249,61 @@ class Ripper:
                     "--progress=-same",
                     f"--minlength={self.config.output.min_length}",
                 ],
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                check=False,
+                bufsize=1,  # Line buffered
             )
             
+            stdout_lines = []
+            stderr_lines = []
+            current_title = 0
+            total_titles = disc_info.titles if hasattr(disc_info, 'titles') else 0
+            if total_titles:
+                total_titles = len(total_titles)
+            else:
+                total_titles = 0
+            
+            # Parse output in real-time
+            while True:
+                stdout_line = process.stdout.readline() if process.stdout else ''
+                stderr_line = process.stderr.readline() if process.stderr else ''
+                
+                if stdout_line:
+                    stdout_lines.append(stdout_line)
+                    # Parse progress from output
+                    # Look for patterns like "Saving title X of Y" or progress indicators
+                    title_match = re.search(r'Title #(\d+)', stdout_line)
+                    if title_match:
+                        current_title = int(title_match.group(1))
+                    
+                    # Update state if state_manager provided
+                    if state_manager and total_titles > 0:
+                        progress = (current_title / total_titles) * 100
+                        state_manager.update_progress(
+                            current_title=current_title,
+                            progress_percent=progress
+                        )
+                
+                if stderr_line:
+                    stderr_lines.append(stderr_line)
+                
+                # Check if process has finished
+                if process.poll() is not None:
+                    # Read any remaining output
+                    remaining_stdout, remaining_stderr = process.communicate()
+                    if remaining_stdout:
+                        stdout_lines.append(remaining_stdout)
+                    if remaining_stderr:
+                        stderr_lines.append(remaining_stderr)
+                    break
+            
+            stdout = ''.join(stdout_lines)
+            stderr = ''.join(stderr_lines)
+            
             # Check output for common issues
-            stderr_lower = result.stderr.lower() if result.stderr else ""
-            stdout_lower = result.stdout.lower() if result.stdout else ""
+            stderr_lower = stderr.lower() if stderr else ""
+            stdout_lower = stdout.lower() if stdout else ""
             
             # Handle unregistered/evaluation mode - this is OK, just a warning
             if "evaluation" in stderr_lower or "unregistered" in stderr_lower:
@@ -256,11 +312,11 @@ class Ripper:
                 return
             
             # Handle actual errors
-            if result.returncode != 0:
-                logger.error(f"Rip failed with exit code {result.returncode}")
-                if result.stderr:
-                    logger.error(f"stderr: {result.stderr}")
-                raise RipError(f"Rip failed: {result.stderr or 'Unknown error'}")
+            if process.returncode != 0:
+                logger.error(f"Rip failed with exit code {process.returncode}")
+                if stderr:
+                    logger.error(f"stderr: {stderr}")
+                raise RipError(f"Rip failed: {stderr or 'Unknown error'}")
             
             logger.info(f"Rip completed: {disc_info.name}")
             

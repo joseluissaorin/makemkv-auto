@@ -18,17 +18,66 @@ logger = get_logger(__name__)
 class SystemdManager:
     """Manages systemd service files and operations."""
     
-    SERVICE_TEMPLATE = """[Unit]
+    def __init__(self, user: bool = False) -> None:
+        self.user = user
+        
+        if user:
+            self.system_dir = Path.home() / ".config" / "systemd" / "user"
+            self.config_path = Path.home() / ".config" / "makemkv-auto" / "config.yaml"
+            self.target = "default.target"
+        else:
+            self.system_dir = Path("/etc/systemd/system")
+            self.config_path = Path("/etc/makemkv-auto/config.yaml")
+            self.target = "multi-user.target"
+    
+    def _get_python_path(self) -> str:
+        """Get the Python executable path that has makemkv_auto installed."""
+        import sys
+        
+        # First, try the current Python (the one running this code)
+        current_python = sys.executable
+        if current_python and self._check_python_has_module(current_python):
+            return current_python
+        
+        # Try common Python versions
+        for py_cmd in ["python3.11", "python3.12", "python3.13", "python3", "python"]:
+            py_path = shutil.which(py_cmd)
+            if py_path and self._check_python_has_module(py_path):
+                return py_path
+        
+        # Fallback to system Python
+        return shutil.which("python3") or shutil.which("python") or "/usr/bin/python3"
+    
+    def _check_python_has_module(self, python_path: str) -> bool:
+        """Check if the given Python has makemkv_auto installed."""
+        try:
+            result = subprocess.run(
+                [python_path, "-c", "import makemkv_auto; print('OK')"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0 and "OK" in result.stdout
+        except Exception:
+            return False
+    
+    def _get_monitor_service_template(self) -> str:
+        """Generate monitor service template based on user/system mode."""
+        user_group_lines = ""
+        if not self.user:
+            user_group_lines = """User=root
+Group=cdrom
+"""
+        
+        return f"""[Unit]
 Description=MakeMKV Auto Monitor - Disc insertion detection
 After=local-fs.target network.target
 
 [Service]
 Type=simple
-User=root
-Group=cdrom
-Environment="PYTHONUNBUFFERED=1"
-Environment="MKA_CONFIG=/etc/makemkv-auto/config.yaml"
-ExecStart={python_path} -m makemkv_auto monitor
+{user_group_lines}Environment="PYTHONUNBUFFERED=1"
+Environment="MKA_CONFIG={self.config_path}"
+ExecStart={self._get_python_path()} -m makemkv_auto monitor
 ExecReload=/bin/kill -HUP $MAINPID
 KillMode=mixed
 Restart=on-failure
@@ -37,10 +86,36 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-WantedBy=multi-user.target
+WantedBy={self.target}
 """
+    
+    def _get_web_service_template(self) -> str:
+        """Generate web service template based on user/system mode."""
+        user_line = ""
+        if not self.user:
+            user_line = "User=root\n"
+        
+        return f"""[Unit]
+Description=MakeMKV Auto Web UI
+After=network.target
+Wants=makemkv-auto-monitor.service
 
-    TIMER_TEMPLATE = """[Unit]
+[Service]
+Type=simple
+{user_line}Environment="MKA_CONFIG={self.config_path}"
+ExecStart={self._get_python_path()} -m uvicorn makemkv_auto.web.app:app --host 0.0.0.0 --port 8766 --log-level info
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy={self.target}
+"""
+    
+    def _get_timer_template(self) -> str:
+        """Generate timer template."""
+        return f"""[Unit]
 Description=MakeMKV Beta Key Update Timer
 
 [Timer]
@@ -50,38 +125,7 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 """
-
-    def __init__(self, user: bool = False) -> None:
-        self.user = user
-        
-        if user:
-            self.system_dir = Path.home() / ".config" / "systemd" / "user"
-        else:
-            self.system_dir = Path("/etc/systemd/system")
     
-    def _get_python_path(self) -> str:
-        """Get the Python executable path."""
-        return shutil.which("python3") or shutil.which("python") or "/usr/bin/python3"
-    
-    WEB_SERVICE_TEMPLATE = """[Unit]
-Description=MakeMKV Auto Web UI
-After=network.target
-Wants=makemkv-auto-monitor.service
-
-[Service]
-Type=simple
-User=root
-Environment="MKA_CONFIG=/etc/makemkv-auto/config.yaml"
-ExecStart=/usr/bin/python3.11 -m uvicorn makemkv_auto.web.app:app --host 0.0.0.0 --port 8766 --log-level info
-Restart=always
-RestartSec=5
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-"""
-
     def install_services(self) -> None:
         """Install systemd service files."""
         logger.info("Installing systemd services...")
@@ -90,20 +134,19 @@ WantedBy=multi-user.target
         self.system_dir.mkdir(parents=True, exist_ok=True)
         
         # Install monitor service
-        service_content = self.SERVICE_TEMPLATE.format(
-            python_path=self._get_python_path(),
-        )
-        
+        service_content = self._get_monitor_service_template()
         service_path = self.system_dir / SYSTEMD_SERVICE_NAME
         service_path.write_text(service_content)
         
         # Install timer
+        timer_content = self._get_timer_template()
         timer_path = self.system_dir / SYSTEMD_TIMER_NAME
-        timer_path.write_text(self.TIMER_TEMPLATE)
+        timer_path.write_text(timer_content)
         
         # Install web service
+        web_content = self._get_web_service_template()
         web_service_path = self.system_dir / "makemkv-auto-web.service"
-        web_service_path.write_text(self.WEB_SERVICE_TEMPLATE)
+        web_service_path.write_text(web_content)
         
         # Reload systemd
         self._daemon_reload()
@@ -176,8 +219,13 @@ WantedBy=multi-user.target
             return {"installed": False}
         
         try:
+            cmd = ["systemctl"]
+            if self.user:
+                cmd.append("--user")
+            cmd.extend(["status", SYSTEMD_SERVICE_NAME])
+            
             result = subprocess.run(
-                ["systemctl", "--user" if self.user else "", "status", SYSTEMD_SERVICE_NAME],
+                cmd,
                 capture_output=True,
                 text=True,
             )
@@ -217,12 +265,12 @@ WantedBy=multi-user.target
     
     def logs(self, follow: bool = False, lines: int = 50) -> str:
         """Get service logs."""
-        cmd = [
-            "journalctl",
-            "--user" if self.user else "",
-            "-u", SYSTEMD_SERVICE_NAME,
-            "-n", str(lines),
-        ]
+        cmd = ["journalctl"]
+        
+        if self.user:
+            cmd.append("--user")
+        
+        cmd.extend(["-u", SYSTEMD_SERVICE_NAME, "-n", str(lines)])
         
         if follow:
             cmd.append("-f")

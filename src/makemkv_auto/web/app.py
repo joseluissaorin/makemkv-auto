@@ -161,6 +161,13 @@ async def api_status():
     return JSONResponse(content=state.to_dict())
 
 
+@app.get("/api/state")
+async def api_state():
+    """Get current service state as JSON (alias for /api/status)."""
+    state = state_manager.state
+    return JSONResponse(content=state.to_dict())
+
+
 @app.get("/api/logs")
 async def api_logs(lines: int = 100, level: Optional[str] = None):
     """Get recent log entries."""

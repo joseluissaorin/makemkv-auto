@@ -109,9 +109,17 @@ class DiscMonitor:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{self.device}"],
                 capture_output=True,
                 text=True,
-                timeout=10,
+                timeout=60,
             )
-            return "drive" in result.stdout.lower()
+            # Check for DRV lines with actual disc data (non-empty name field)
+            for line in result.stdout.split('\n'):
+                if line.startswith('DRV:'):
+                    parts = line.split('","')
+                    if len(parts) >= 3:
+                        disc_name = parts[1].strip('"')
+                        if disc_name:
+                            return True
+            return False
         except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
             return False
     
@@ -123,7 +131,6 @@ class DiscMonitor:
         try:
             pid = int(self.lock_file.read_text().strip())
             # Check if process is still running
-            import os
             os.kill(pid, 0)
             return True
         except (ValueError, OSError, ProcessLookupError):
@@ -182,12 +189,11 @@ class DiscMonitor:
             notify(f"Starting rip: {disc_info.name}")
             
             try:
-                ripper.rip_disc(disc_info, output_path)
+                ripper.rip_disc(disc_info, output_path, state_manager=self.state_manager)
                 logger.info(f"Rip completed: {disc_info.name}")
                 notify(f"Rip completed: {disc_info.name}")
                 
                 # Count files and size
-                import os
                 file_count = 0
                 total_size = 0
                 for root, dirs, files in os.walk(output_path):
