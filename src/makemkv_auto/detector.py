@@ -7,8 +7,10 @@ import statistics
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
+from pathlib import Path
 
 from makemkv_auto.logger import get_logger
+from makemkv_auto.config import Config
 
 logger = get_logger(__name__)
 
@@ -18,6 +20,148 @@ class ContentType(Enum):
     MOVIE = "movie"
     TV_SHOW = "tvshow"
     UNKNOWN = "unknown"
+
+
+# Known TV shows that have movie-length episodes (60-120 min)
+# These are often misdetected as movies
+KNOWN_TV_SHOWS = {
+    # Detective/Mystery series with feature-length episodes
+    'miss marple',
+    'agatha christie',
+    'poirot',
+    'hercule poirot',
+    'sherlock',
+    'sherlock holmes',
+    'midsomer murders',
+    'inspector morse',
+    'lewis',
+    'endeavour',
+    'inspector lewis',
+    'vera',
+    'shetland',
+    'broadchurch',
+    'line of duty',
+    'happy valley',
+    'fargo',
+    'true detective',
+    'the killing',
+    'wallander',
+    'inspector montalbano',
+    'commissario montalbano',
+    'donna leon',
+    'bruno',
+    'dicte',
+    'the bridge',
+    'bron',
+    'young wallander',
+    
+    # Anthology series
+    'black mirror',
+    'inside no. 9',
+    'love death and robots',
+    'electric dreams',
+    'twilight zone',
+    'tales from the loop',
+    ' cabinet of curiosities',
+    
+    # Miniseries (often movie-length per episode)
+    'band of brothers',
+    'the pacific',
+    'generation kill',
+    'chernobyl',
+    'the queen',
+    'crown',
+    'manhunt',
+    'when they see us',
+    'sharp objects',
+    'big little lies',
+    'mare of easttown',
+    'night manager',
+    'little dorrit',
+    'bleak house',
+    'pride and prejudice',
+    'north and south',
+    'jane eyre',
+    'wuthering heights',
+    'tess of the',
+    'vanity fair',
+    'david copperfield',
+    'oliver twist',
+    'great expectations',
+    
+    # British series with long episodes
+    'downton abbey',
+    'upstairs downstairs',
+    'the crown',
+    'victoria',
+    'the durrells',
+    'grantchester',
+    'father brown',
+    'sister boniface',
+    'murdoch mysteries',
+    'rosehaven',
+    'death in paradise',
+    'marcella',
+    'the fall',
+    'prime suspect',
+    'cracker',
+    'wire in the blood',
+    'silent witness',
+    'new tricks',
+    'as time goes by',
+    'last tango in halifax',
+    'happy valley',
+    
+    # Nordic noir
+    'the killing',
+    'forbrydelsen',
+    'borgia',
+    'the borgias',
+    'medici',
+    'versailles',
+    'vikings',
+    'the last kingdom',
+    'tudors',
+    'the tudors',
+    'white queen',
+    'white princess',
+    'spanish princess',
+    'pillars of the earth',
+    'world without end',
+    'spartacus',
+    'rome',
+    
+    # Premium cable series
+    'game of thrones',
+    'house of the dragon',
+    'westworld',
+    'watchmen',
+    ' His Dark Materials',
+    'the golden compass',
+    'da vinci',
+    'the borgias',
+    'the white queen',
+    'the white princess',
+    'versailles',
+    'the crown',
+    'outlander',
+    'vikings',
+    'the last kingdom',
+    
+    # Period dramas
+    'mad men',
+    'the americans',
+    'halt and catch fire',
+    'better call saul',
+    'breaking bad',
+    'the sopranos',
+    'the wire',
+    'boardwalk empire',
+    'homeland',
+    'house of cards',
+    'the morning show',
+    'succession',
+}
 
 
 @dataclass
@@ -41,65 +185,28 @@ class DetectionResult:
 class SmartContentDetector:
     """
     Advanced detector for distinguishing movies from TV shows.
-    
-    Key insights:
-    - TV episodes cluster around similar durations (20-25min or 40-50min)
-    - Movies have one dominant title with much larger size
-    - Blu-rays may split movies into chapters, but duration pattern differs
     """
     
-    # Typical episode durations in minutes
-    TV_EPISODE_PATTERNS = {
-        "sitcom": (18, 26),      # 18-26 minutes
-        "drama": (38, 52),       # 38-52 minutes
-        "animated": (20, 24),    # 20-24 minutes
-        "premium": (50, 65),     # 50-65 minutes (HBO, etc.)
-    }
-    
-    # TV indicators in disc names (case-insensitive)
-    TV_NAME_INDICATORS = [
-        r'season\s*\d+',           # Season 1, Season 2, etc.
-        r's\d{1,2}',               # S1, S2, S01, S12
-        r'temporada\s*\d+',        # Temporada 1 (Spanish)
-        r'disc\s*\d+',              # Disc 1, Disc 2
-        r'volume\s*\d+',           # Volume 1
-        r'part\s*\d+',             # Part 1
-        r'episodes?',               # Episode, Episodes
-        r'chapters?',               # Chapters (TV releases)
-        r'complete\s+series',       # Complete Series
-        r'the\s+complete',          # The Complete
-        r'collector\'s\s+set',      # Collector's Set
-        r'box\s+set',               # Box Set
-        r'tv\s+series',             # TV Series
-    ]
-    
-    # Movie indicators in disc names
-    MOVIE_NAME_INDICATORS = [
-        r'\(\d{4}\)',              # Year in parentheses: (2023)
-        r'\d{4}$',                  # Year at end: Movie Name 2023
-        r'\[remastered\]',         # [Remastered]
-        r'\[collector',            # [Collector's Edition]
-        r'4k\s+remaster',          # 4K Remaster
-        r'criterion',               # Criterion Collection
-        r'director\'s\s+cut',      # Director's Cut
-        r'extended\s+cut',         # Extended Cut
-        r'theatrical\s+cut',       # Theatrical Cut
-        r'ultimate\s+edition',     # Ultimate Edition
-    ]
-    
-    def __init__(self, min_episode_duration: int = 15, max_episode_duration: int = 70,
-                 min_movie_duration: int = 60) -> None:
+    def __init__(self, config: Config, min_episode_duration: int = 15, 
+                 max_episode_duration: int = 70, min_movie_duration: int = 60) -> None:
+        self.config = config
         self.min_episode_duration = min_episode_duration
         self.max_episode_duration = max_episode_duration
         self.min_movie_duration = min_movie_duration
     
     def detect(self, titles: list[TitleInfo], disc_name: str) -> DetectionResult:
-        """
-        Detect content type using multiple heuristics.
-        
-        Returns DetectionResult with type, confidence, and explanation.
-        """
+        """Detect content type using multiple heuristics."""
         logger.debug(f"Detecting content type for '{disc_name}' with {len(titles)} titles")
+        
+        # 1. Check manual override first (highest priority)
+        override_result = self._check_manual_override(disc_name)
+        if override_result:
+            return override_result
+        
+        # 2. Check known TV shows database
+        known_tv_result = self._check_known_tv_shows(disc_name)
+        if known_tv_result:
+            return known_tv_result
         
         # Filter out short/extra content
         main_titles = self._filter_main_content(titles)
@@ -111,22 +218,136 @@ class SmartContentDetector:
                 reason="No main content titles found"
             )
         
-        # Run multiple detection methods
+        # 3. Check multi-disc pattern (Disc 1, Disc 2, etc.)
+        multidisc_result = self._check_multidisc_pattern(disc_name)
+        if multidisc_result:
+            return multidisc_result
+        
+        # Run remaining detection methods
         name_result = self._detect_by_name(disc_name)
         duration_result = self._detect_by_duration_pattern(main_titles)
         size_result = self._detect_by_size_distribution(main_titles)
+        count_result = self._detect_by_title_count(main_titles)
         cluster_result = self._detect_by_clustering(main_titles)
         
         # Combine results with weighted voting
         return self._combine_results(
-            [name_result, duration_result, size_result, cluster_result],
+            [name_result, duration_result, size_result, count_result, cluster_result],
             disc_name,
             main_titles
         )
     
+    def _check_manual_override(self, disc_name: str) -> Optional[DetectionResult]:
+        """Check if there's a manual override in config."""
+        if not self.config or not hasattr(self.config, 'detection'):
+            return None
+            
+        forced_types = getattr(self.config.detection, 'forced_types', {})
+        if not forced_types:
+            return None
+        
+        # Check exact match
+        if disc_name in forced_types:
+            forced_type = forced_types[disc_name]
+            content_type = ContentType.TV_SHOW if forced_type == "tvshow" else ContentType.MOVIE
+            return DetectionResult(
+                content_type=content_type,
+                confidence="high",
+                reason=f"Manual override in config: forced as {forced_type}",
+                suggested_name=self._clean_name(disc_name)
+            )
+        
+        # Check case-insensitive match
+        disc_lower = disc_name.lower()
+        for name, forced_type in forced_types.items():
+            if name.lower() == disc_lower:
+                content_type = ContentType.TV_SHOW if forced_type == "tvshow" else ContentType.MOVIE
+                return DetectionResult(
+                    content_type=content_type,
+                    confidence="high",
+                    reason=f"Manual override in config: forced as {forced_type}",
+                    suggested_name=self._clean_name(disc_name)
+                )
+        
+        return None
+    
+    def _check_known_tv_shows(self, disc_name: str) -> Optional[DetectionResult]:
+        """Check if disc name matches known TV shows with movie-length episodes."""
+        disc_lower = disc_name.lower()
+        
+        for known_show in KNOWN_TV_SHOWS:
+            if known_show in disc_lower:
+                return DetectionResult(
+                    content_type=ContentType.TV_SHOW,
+                    confidence="high",
+                    reason=f"Detected as TV show: '{known_show}' is in known TV shows database",
+                    suggested_name=self._clean_name(disc_name)
+                )
+        
+        return None
+    
+    def _check_multidisc_pattern(self, disc_name: str) -> Optional[DetectionResult]:
+        """Check if disc name suggests multi-disc TV series."""
+        # Look for patterns like "Disc 1", "Disc 2", "Part 1", "Volume 1"
+        multidisc_pattern = re.search(
+            r'(?:\s*[-:]?\s*(?:disc|part|volume|vol)\s*\d+)$', 
+            disc_name, 
+            re.IGNORECASE
+        )
+        
+        if multidisc_pattern:
+            return DetectionResult(
+                content_type=ContentType.TV_SHOW,
+                confidence="high",
+                reason=f"Multi-disc pattern detected: '{multidisc_pattern.group(0)}'",
+                suggested_name=self._clean_name(disc_name)
+            )
+        
+        return None
+    
+    def _detect_by_title_count(self, titles: list[TitleInfo]) -> DetectionResult:
+        """Detect based on number of titles and their durations."""
+        if len(titles) < 2:
+            return DetectionResult(
+                content_type=ContentType.UNKNOWN,
+                confidence="low",
+                reason="Insufficient titles for count analysis"
+            )
+        
+        durations = [t.duration // 60 for t in titles]  # in minutes
+        
+        # TV series pattern: 2-8 titles, each 45-120 minutes
+        # (typical for British series with movie-length episodes)
+        if 2 <= len(titles) <= 12:
+            # Check if all durations are in TV episode range (including movie-length)
+            tv_duration_count = sum(1 for d in durations if 40 <= d <= 130)
+            
+            if tv_duration_count >= len(titles) * 0.8:  # 80% match
+                avg_duration = sum(durations) / len(durations)
+                return DetectionResult(
+                    content_type=ContentType.TV_SHOW,
+                    confidence="high",
+                    reason=f"{len(titles)} titles with TV episode durations (avg {int(avg_duration)} min each)"
+                )
+        
+        # Movie pattern: 1-2 main titles, one significantly longer
+        if len(titles) <= 3:
+            max_duration = max(durations)
+            if max_duration >= 80:  # At least 80 minutes
+                return DetectionResult(
+                    content_type=ContentType.MOVIE,
+                    confidence="medium",
+                    reason=f"{len(titles)} titles, longest is {max_duration} min"
+                )
+        
+        return DetectionResult(
+            content_type=ContentType.UNKNOWN,
+            confidence="low",
+            reason="Title count analysis inconclusive"
+        )
+    
     def _filter_main_content(self, titles: list[TitleInfo]) -> list[TitleInfo]:
         """Filter out extras, trailers, and short content."""
-        # Keep titles longer than 10 minutes
         min_duration = 10 * 60  # 10 minutes in seconds
         return [t for t in titles if t.duration >= min_duration]
     
@@ -134,41 +355,45 @@ class SmartContentDetector:
         """Detect based on disc name patterns."""
         name_lower = disc_name.lower()
         
-        # Check for TV indicators
-        for pattern in self.TV_NAME_INDICATORS:
+        # TV indicators
+        tv_indicators = [
+            r'season\s*\d+', r's\d{1,2}', r'temporada\s*\d+',
+            r'disc\s*\d+', r'volume\s*\d+', r'part\s*\d+',
+            r'episodes?', r'chapters?', r'complete\s+series',
+            r'the\s+complete', r'box\s+set', r'tv\s+series',
+        ]
+        
+        for pattern in tv_indicators:
             if re.search(pattern, name_lower, re.IGNORECASE):
-                # Extract season number if present
-                season_match = re.search(r'(?:season|s|temporada)\s*(\d+)', name_lower, re.IGNORECASE)
-                if season_match:
-                    reason = f"Disc name contains season indicator (Season {season_match.group(1)})"
-                else:
-                    reason = f"Disc name matches TV pattern: '{pattern}'"
-                
                 return DetectionResult(
                     content_type=ContentType.TV_SHOW,
                     confidence="high",
-                    reason=reason
+                    reason=f"Disc name matches TV pattern"
                 )
         
-        # Check for movie indicators
-        for pattern in self.MOVIE_NAME_INDICATORS:
+        # Movie indicators
+        movie_indicators = [
+            r'\(\d{4}\)', r'\d{4}$', r'criterion',
+            r'director\'s\s+cut', r'extended\s+cut',
+        ]
+        
+        for pattern in movie_indicators:
             if re.search(pattern, name_lower, re.IGNORECASE):
                 return DetectionResult(
                     content_type=ContentType.MOVIE,
                     confidence="high",
-                    reason=f"Disc name matches movie pattern: '{pattern}'"
+                    reason=f"Disc name matches movie pattern"
                 )
         
         return DetectionResult(
             content_type=ContentType.UNKNOWN,
             confidence="low",
-            reason="No clear name indicators found"
+            reason="No clear name indicators"
         )
     
     def _detect_by_duration_pattern(self, titles: list[TitleInfo]) -> DetectionResult:
         """Detect based on title duration patterns."""
         if len(titles) < 2:
-            # Single title - likely a movie if long enough
             if titles and titles[0].duration >= self.min_movie_duration * 60:
                 duration_min = titles[0].duration // 60
                 return DetectionResult(
@@ -182,52 +407,57 @@ class SmartContentDetector:
                 reason="Single short title"
             )
         
-        # Multiple titles - analyze duration variance
-        durations = [t.duration // 60 for t in titles]  # Convert to minutes
+        durations = [t.duration // 60 for t in titles]
         
         if len(durations) >= 2:
             variance = statistics.variance(durations)
             mean_duration = statistics.mean(durations)
             
-            # TV episodes have low variance (similar lengths)
-            # Movies split into chapters might have different pattern
-            if variance < 100:  # Low variance threshold
-                # Check if durations match typical episode patterns
-                for pattern_name, (min_d, max_d) in self.TV_EPISODE_PATTERNS.items():
+            # Low variance = similar lengths = likely TV
+            if variance < 100:
+                # Check if TV episode patterns
+                for pattern_name, (min_d, max_d) in {
+                    "sitcom": (18, 26),
+                    "drama": (38, 52),
+                    "premium": (50, 65),
+                    "movie-length": (60, 130),
+                }.items():
                     if all(min_d <= d <= max_d for d in durations):
                         return DetectionResult(
                             content_type=ContentType.TV_SHOW,
                             confidence="high",
-                            reason=f"All {len(titles)} titles have similar {pattern_name} episode durations "
-                                   f"({min_d}-{max_d} min each)"
+                            reason=f"All titles have similar {pattern_name} durations"
                         )
                 
-                # Similar durations but not matching known episode patterns
                 if mean_duration >= self.min_movie_duration:
                     return DetectionResult(
                         content_type=ContentType.MOVIE,
                         confidence="medium",
-                        reason=f"{len(titles)} titles with similar durations around {int(mean_duration)} min "
-                               f"(possible movie chapters)"
+                        reason=f"Similar durations around {int(mean_duration)} min"
                     )
             else:
-                # High variance - likely a mix or movie with extras
+                # High variance
                 max_duration = max(durations)
                 total_duration = sum(durations)
                 
-                # If one title dominates (>70% of total duration), it's probably a movie
+                if total_duration == 0:
+                    return DetectionResult(
+                        content_type=ContentType.UNKNOWN,
+                        confidence="low",
+                        reason="Cannot analyze: zero total duration"
+                    )
+                
                 if max_duration / total_duration > 0.7:
                     return DetectionResult(
                         content_type=ContentType.MOVIE,
                         confidence="high",
-                        reason=f"One dominant title ({max_duration} min, {max_duration/total_duration*100:.0f}% of total)"
+                        reason=f"One dominant title ({max_duration} min)"
                     )
                 else:
-                    # Multiple similar-sized titles with variance - could be TV
                     return DetectionResult(
                         content_type=ContentType.TV_SHOW,
                         confidence="medium",
-                        reason=f"{len(titles)} titles with varying durations, suggesting episodes"
+                        reason=f"Multiple titles with varying durations"
                     )
         
         return DetectionResult(
@@ -239,7 +469,7 @@ class SmartContentDetector:
     def _detect_by_size_distribution(self, titles: list[TitleInfo]) -> DetectionResult:
         """Detect based on file size distribution."""
         if len(titles) < 2:
-            if titles and titles[0].size_bytes > 10 * 1024**3:  # >10GB
+            if titles and titles[0].size_bytes > 10 * 1024**3:
                 return DetectionResult(
                     content_type=ContentType.MOVIE,
                     confidence="high",
@@ -251,30 +481,35 @@ class SmartContentDetector:
                 reason="Insufficient size data"
             )
         
-        sizes = [t.size_bytes / (1024**3) for t in titles]  # Convert to GB
+        sizes = [t.size_bytes / (1024**3) for t in titles]
         
         if len(sizes) >= 2:
             total_size = sum(sizes)
             max_size = max(sizes)
             mean_size = statistics.mean(sizes)
             
-            # If one file dominates (>80%), it's likely a movie
+            if total_size == 0:
+                return DetectionResult(
+                    content_type=ContentType.UNKNOWN,
+                    confidence="low",
+                    reason="Cannot analyze: zero total size"
+                )
+            
             if max_size / total_size > 0.8:
                 return DetectionResult(
                     content_type=ContentType.MOVIE,
                     confidence="high",
-                    reason=f"One dominant file ({max_size:.1f}GB, {max_size/total_size*100:.0f}% of total size)"
+                    reason=f"One dominant file ({max_size:.1f}GB)"
                 )
             
-            # If files are similar size (<30% variance), likely TV episodes
-            if len(sizes) >= 2:
+            if len(sizes) >= 2 and mean_size > 0:
                 try:
                     variance = statistics.variance(sizes)
-                    if variance / (mean_size ** 2) < 0.3:  # Coefficient of variation < 30%
+                    if variance / (mean_size ** 2) < 0.3:
                         return DetectionResult(
                             content_type=ContentType.TV_SHOW,
                             confidence="high",
-                            reason=f"{len(titles)} files of similar size (~{mean_size:.1f}GB each)"
+                            reason=f"Files of similar size (~{mean_size:.1f}GB each)"
                         )
                 except statistics.StatisticsError:
                     pass
@@ -295,8 +530,6 @@ class SmartContentDetector:
             )
         
         durations = [t.duration // 60 for t in titles]
-        
-        # Simple clustering: group by similar durations (within 5 min)
         clusters = []
         sorted_durations = sorted(durations)
         current_cluster = [sorted_durations[0]]
@@ -309,27 +542,25 @@ class SmartContentDetector:
                 current_cluster = [d]
         clusters.append(current_cluster)
         
-        # If we have one large cluster with most titles, likely TV show
         largest_cluster = max(clusters, key=len)
         if len(largest_cluster) >= len(titles) * 0.7 and len(largest_cluster) >= 2:
             mean_dur = statistics.mean(largest_cluster)
             return DetectionResult(
                 content_type=ContentType.TV_SHOW,
                 confidence="high",
-                reason=f"{len(largest_cluster)} of {len(titles)} titles cluster around {int(mean_dur)} min"
+                reason=f"{len(largest_cluster)} titles cluster around {int(mean_dur)} min"
             )
         
         return DetectionResult(
             content_type=ContentType.UNKNOWN,
             confidence="low",
-            reason="Clustering results inconclusive"
+            reason="Clustering inconclusive"
         )
     
     def _combine_results(self, results: list[DetectionResult], disc_name: str,
                         titles: list[TitleInfo]) -> DetectionResult:
         """Combine multiple detection results with weighted voting."""
         
-        # Weight by confidence
         tv_votes = 0
         movie_votes = 0
         reasons = []
@@ -351,13 +582,13 @@ class SmartContentDetector:
             if r.reason and r.confidence in ("high", "medium"):
                 reasons.append(r.reason)
         
-        # Decide based on votes
+        # Decide
         if tv_votes > movie_votes:
             confidence = "high" if tv_votes >= 3 else "medium"
             return DetectionResult(
                 content_type=ContentType.TV_SHOW,
                 confidence=confidence,
-                reason=f"TV Show detected: {'; '.join(reasons[:2])}",
+                reason=f"TV Show: {'; '.join(reasons[:2])}",
                 suggested_name=self._clean_name(disc_name)
             )
         elif movie_votes > tv_votes:
@@ -365,52 +596,44 @@ class SmartContentDetector:
             return DetectionResult(
                 content_type=ContentType.MOVIE,
                 confidence=confidence,
-                reason=f"Movie detected: {'; '.join(reasons[:2])}",
+                reason=f"Movie: {'; '.join(reasons[:2])}",
                 suggested_name=self._clean_name(disc_name)
             )
         else:
-            # Tie-breaker: duration of longest title
             if titles:
                 longest = max(titles, key=lambda t: t.duration)
-                if longest.duration >= 90 * 60:  # 90+ minutes
+                if longest.duration >= 90 * 60:
                     return DetectionResult(
                         content_type=ContentType.MOVIE,
                         confidence="medium",
-                        reason=f"Ambiguous pattern, but longest title is {longest.duration//60} min (movie-length)",
+                        reason=f"Ambiguous, but longest is {longest.duration//60} min",
                         suggested_name=self._clean_name(disc_name)
                     )
             
             return DetectionResult(
                 content_type=ContentType.UNKNOWN,
                 confidence="low",
-                reason="Could not determine content type from available data",
+                reason="Could not determine content type",
                 suggested_name=self._clean_name(disc_name)
             )
     
     def _clean_name(self, name: str) -> str:
-        """Clean disc name by removing season/episode indicators for folder naming."""
-        # Remove season indicators
+        """Clean disc name by removing season/episode indicators."""
         cleaned = re.sub(r'\s*[-:]?\s*(?:season|temporada)\s*\d+.*$', '', name, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s+s\d+.*$', '', cleaned, flags=re.IGNORECASE)
         cleaned = re.sub(r'\s*[-:]?\s*disc\s*\d+.*$', '', cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(r'\s*\(\d{4}\)\s*$', '', cleaned)  # Remove year
-        
-        # Clean up whitespace
+        cleaned = re.sub(r'\s*[-:]?\s*(?:part|volume|vol)\s*\d+.*$', '', cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*\(\d{4}\)\s*$', '', cleaned)
         cleaned = ' '.join(cleaned.split())
-        
         return cleaned.strip()
 
 
-def detect_content_type(titles: list[TitleInfo], disc_name: str,
-                       min_episode_duration: int = 15,
-                       max_episode_duration: int = 70,
+def detect_content_type(titles: list[TitleInfo], disc_name: str, config: Config = None,
+                       min_episode_duration: int = 15, max_episode_duration: int = 70,
                        min_movie_duration: int = 60) -> tuple[ContentType, str]:
-    """
-    Convenience function for content type detection.
-    
-    Returns (content_type, confidence) for backward compatibility.
-    """
+    """Convenience function for content type detection."""
     detector = SmartContentDetector(
+        config=config,
         min_episode_duration=min_episode_duration,
         max_episode_duration=max_episode_duration,
         min_movie_duration=min_movie_duration
@@ -418,7 +641,7 @@ def detect_content_type(titles: list[TitleInfo], disc_name: str,
     
     result = detector.detect(titles, disc_name)
     
-    logger.info(f"Content detection for '{disc_name}': {result.content_type.value} "
+    logger.info(f"Detected '{disc_name}': {result.content_type.value} "
                 f"(confidence: {result.confidence}) - {result.reason}")
     
     return result.content_type, result.confidence

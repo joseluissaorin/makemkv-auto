@@ -235,6 +235,81 @@ async def api_refresh():
     return JSONResponse(content=state.to_dict())
 
 
+@app.post("/api/clear-error")
+async def api_clear_error():
+    """Clear error state and return to idle."""
+    state_manager.clear_error()
+    state = state_manager.state
+    return JSONResponse(content={"success": True, "state": state.to_dict()})
+
+
+@app.post("/api/move")
+async def api_move(disc_name: Optional[str] = None, target_type: Optional[str] = None):
+    """Move a ripped disc from Movies to Series or vice versa."""
+    try:
+        if not config:
+            return JSONResponse(
+                content={"success": False, "message": "Config not loaded"},
+                status_code=500
+            )
+        
+        # Use last_rip if no disc_name provided
+        if not disc_name and state_manager.state.last_rip:
+            disc_name = state_manager.state.last_rip.name
+        
+        if not disc_name:
+            return JSONResponse(
+                content={"success": False, "message": "No disc name provided and no last rip"},
+                status_code=400
+            )
+        
+        # Determine source and target paths
+        source_base = config.paths.movies if target_type == "tvshow" else config.paths.tv_shows
+        target_base = config.paths.tv_shows if target_type == "tvshow" else config.paths.movies
+        
+        if not source_base or not target_base:
+            return JSONResponse(
+                content={"success": False, "message": "Source or target path not configured"},
+                status_code=500
+            )
+        
+        source_path = source_base / disc_name
+        target_path = target_base / disc_name
+        
+        if not source_path.exists():
+            return JSONResponse(
+                content={"success": False, "message": f"Source not found: {source_path}"},
+                status_code=404
+            )
+        
+        if target_path.exists():
+            return JSONResponse(
+                content={"success": False, "message": f"Target already exists: {target_path}"},
+                status_code=409
+            )
+        
+        # Move the directory
+        import shutil
+        shutil.move(str(source_path), str(target_path))
+        
+        target_type_name = "TV Shows" if target_type == "tvshow" else "Movies"
+        logger.info(f"Moved '{disc_name}' from {source_base} to {target_base}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Moved '{disc_name}' to {target_type_name}",
+            "source": str(source_path),
+            "target": str(target_path)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error moving disc: {e}")
+        return JSONResponse(
+            content={"success": False, "message": str(e)},
+            status_code=500
+        )
+
+
 @app.get("/api/config")
 async def api_config():
     """Get safe configuration values."""

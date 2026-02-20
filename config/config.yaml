@@ -21,6 +21,17 @@ detection:
   auto_eject: true
   overwrite_existing: false
 
+  # Manual overrides for content type detection
+  # Use this for TV shows with movie-length episodes that get misdetected
+  # Format: "Disc Name": "tvshow" or "Disc Name": "movie"
+  # Example shows below (remove or modify as needed):
+  forced_types:
+    # "MISS MARPLE": "tvshow"
+    # "AGATHA CHRISTIE": "tvshow"
+    # "POIROT": "tvshow"
+    # "SHERLOCK": "tvshow"
+    # Add your own overrides here...
+
 output:
   naming_pattern: "{title}"
   create_nfo: false

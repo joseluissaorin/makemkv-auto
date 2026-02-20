@@ -85,30 +85,46 @@
 
 {% if state.last_rip %}
 <section class="secondary-section">
-    
+
     <div class="section-header">
         <h2 class="section-title">Last Rip</h2>
-        
+
         <span class="section-meta">{{ state.last_rip.completed_at[:10] if state.last_rip.completed_at else '' }}</span>
     </div>
-    
-    
+
+
     <ul class="info-list">
         <li class="info-item">
             <span class="info-label">Name</span>
             <span class="info-value">{{ state.last_rip.name }}</span>
         </li>
-        
+
         <li class="info-item">
             <span class="info-label">Files</span>
             <span class="info-value">{{ state.last_rip.file_count }}</span>
         </li>
-        
+
         <li class="info-item">
             <span class="info-label">Size</span>
             <span class="info-value">{{ "%.1f" | format(state.last_rip.total_size_mb) }} MB</span>
         </li>
     </ul>
+
+    <div class="move-section" style="margin-top: var(--space-lg); padding-top: var(--space-lg); border-top: 1px solid var(--border);">
+        <div class="move-label" style="font-size: 0.75rem; color: var(--text-secondary); margin-bottom: var(--space-sm);">
+            Misdetected? Move to:
+        </div>
+        <div class="btn-group">
+            <form action="/api/move" method="post" style="display: inline;">
+                <input type="hidden" name="target_type" value="movie">
+                <button type="submit" class="btn btn-small">→ Movies</button>
+            </form>
+            <form action="/api/move" method="post" style="display: inline;">
+                <input type="hidden" name="target_type" value="tvshow">
+                <button type="submit" class="btn btn-small">→ Series</button>
+            </form>
+        </div>
+    </div>
 
 </section>
 {% endif %}

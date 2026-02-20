@@ -62,12 +62,18 @@ class DeviceConfig(BaseModel):
 
 class DetectionConfig(BaseModel):
     """Content detection configuration."""
-    
+
     min_episode_duration: int = DEFAULT_MIN_EPISODE_DURATION  # minutes
     max_episode_duration: int = DEFAULT_MAX_EPISODE_DURATION  # minutes
     min_movie_duration: int = DEFAULT_MIN_MOVIE_DURATION  # minutes
     auto_eject: bool = True
     overwrite_existing: bool = False
+    forced_types: dict[str, str] = Field(default_factory=dict)
+    """Manual overrides for content type detection.
+    
+    Format: {"disc_name": "tvshow"} or {"disc_name": "movie"}
+    Example: {"MISS MARPLE": "tvshow", "RANDOM MOVIE": "movie"}
+    """
 
 
 class OutputConfig(BaseModel):

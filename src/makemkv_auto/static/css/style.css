@@ -265,6 +265,12 @@ p {
     color: var(--white);
 }
 
+.btn-small {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.4rem;
+    letter-spacing: 0.03em;
+}
+
 .btn-group {
     display: flex;
     gap: var(--space-sm);

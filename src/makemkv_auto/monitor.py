@@ -75,27 +75,40 @@ class DiscMonitor:
     
     def _check_disc(self) -> None:
         """Check for disc and process if found."""
+        logger.debug(f"_check_disc() called - checking device {self.device}")
+        
         # Check if drive exists
         if not Path(self.device).exists():
+            logger.debug(f"Device {self.device} does not exist, skipping check")
             return
+        logger.debug(f"Device {self.device} exists")
         
         # Check if already ripping
         if self._is_ripping():
+            logger.debug("Already ripping, skipping check")
             return
+        logger.debug("Not currently ripping")
         
         # Check for disc
+        logger.debug(f"Calling _is_disc_present() for {self.device}")
         disc_present = self._is_disc_present()
+        logger.debug(f"_is_disc_present() returned: {disc_present}")
+        logger.debug(f"Current disc_inserted state: {self.disc_inserted}")
         
         if disc_present and not self.disc_inserted:
             # New disc detected
-            logger.info("New disc detected!")
+            logger.info("*** NEW DISC DETECTED! ***")
+            logger.info(f"Disc inserted state was: {self.disc_inserted}, changing to True")
             self.disc_inserted = True
             
             # Wait for drive to settle
+            logger.info("Waiting 3 seconds for drive to settle...")
             time.sleep(3)
             
             # Process disc
+            logger.info("Starting _process_disc()")
             self._process_disc()
+            logger.info("_process_disc() completed")
             
         elif not disc_present and self.disc_inserted:
             # Disc removed
@@ -104,23 +117,44 @@ class DiscMonitor:
     
     def _is_disc_present(self) -> bool:
         """Check if a disc is present."""
+        logger.debug(f"_is_disc_present() called for device {self.device}")
         try:
+            logger.debug(f"Running makemkvcon info command for {self.device}")
             result = subprocess.run(
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{self.device}"],
                 capture_output=True,
                 text=True,
                 timeout=60,
             )
+            logger.debug(f"makemkvcon completed with return code: {result.returncode}")
+            logger.debug(f"makemkvcon stdout length: {len(result.stdout)} chars")
+            logger.debug(f"makemkvcon stderr length: {len(result.stderr)} chars")
+            
             # Check for DRV lines with actual disc data (non-empty name field)
-            for line in result.stdout.split('\n'):
-                if line.startswith('DRV:'):
-                    parts = line.split('","')
-                    if len(parts) >= 3:
-                        disc_name = parts[1].strip('"')
-                        if disc_name:
-                            return True
+            drv_lines = [line for line in result.stdout.split('\n') if line.startswith('DRV:')]
+            logger.debug(f"Found {len(drv_lines)} DRV lines")
+            
+            for i, line in enumerate(drv_lines):
+                logger.debug(f"Processing DRV line {i}: {line[:100]}...")
+                parts = line.split('","')
+                logger.debug(f"  Split into {len(parts)} parts")
+                if len(parts) >= 3:
+                    disc_name = parts[1].strip('"')
+                    logger.debug(f"  Disc name: '{disc_name}'")
+                    if disc_name:
+                        logger.info(f"*** DISC PRESENT: '{disc_name}' ***")
+                        return True
+            
+            logger.debug("No disc found in any DRV line")
             return False
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+        except subprocess.TimeoutExpired as e:
+            logger.error(f"TIMEOUT: makemkvcon timed out after 60s: {e}")
+            return False
+        except subprocess.CalledProcessError as e:
+            logger.error(f"CALLEDPROCESSERROR: makemkvcon failed: {e}")
+            return False
+        except FileNotFoundError as e:
+            logger.error(f"FILENOTFOUND: makemkvcon not found: {e}")
             return False
     
     def _is_ripping(self) -> bool:
@@ -140,21 +174,40 @@ class DiscMonitor:
     
     def _process_disc(self) -> None:
         """Process detected disc."""
-        logger.info("Processing disc...")
+        logger.info("="*60)
+        logger.info("PROCESS_DISC STARTED")
+        logger.info("="*60)
         
         # Create lock file
+        logger.info(f"Creating lock file: {self.lock_file}")
         self.lock_file.write_text(str(os.getpid()))
+        logger.info(f"Lock file created with PID: {os.getpid()}")
         
         try:
+            logger.info("Creating DiscAnalyzer...")
             analyzer = DiscAnalyzer(self.config)
+            logger.info("DiscAnalyzer created successfully")
+            
+            logger.info("Creating Ripper...")
             ripper = Ripper(self.config)
+            logger.info("Ripper created successfully")
             
             # Analyze disc
+            logger.info("Calling analyzer.get_disc_info()...")
             disc_info = analyzer.get_disc_info()
+            logger.info(f"*** ANALYSIS COMPLETE ***")
+            logger.info(f"Disc name: {disc_info.name}")
+            logger.info(f"Sanitized name: {disc_info.sanitized_name}")
+            logger.info(f"Content type: {disc_info.content_type}")
+            logger.info(f"Confidence: {disc_info.confidence}")
+            logger.info(f"Number of titles: {len(disc_info.titles)}")
             logger.info(f"Detected: {disc_info.name} ({disc_info.content_type.value})")
             
             # Update state - start ripping
             total_titles = len(disc_info.titles) if hasattr(disc_info, 'titles') else 1
+            logger.info(f"Total titles to rip: {total_titles}")
+            
+            logger.info("Calling state_manager.start_rip()...")
             self.state_manager.start_rip(
                 disc_name=disc_info.name,
                 sanitized_name=disc_info.sanitized_name,
@@ -162,6 +215,7 @@ class DiscMonitor:
                 total_titles=total_titles,
                 device=self.device
             )
+            logger.info("State updated to 'ripping'")
             
             # Determine output path
             if disc_info.content_type.value == "tvshow":
@@ -185,12 +239,14 @@ class DiscMonitor:
                     return
             
             # Rip disc
-            logger.info(f"Ripping to: {output_path}")
+            logger.info(f"Starting rip process...")
+            logger.info(f"Output path: {output_path}")
             notify(f"Starting rip: {disc_info.name}")
             
             try:
+                logger.info("Calling ripper.rip_disc()...")
                 ripper.rip_disc(disc_info, output_path, state_manager=self.state_manager)
-                logger.info(f"Rip completed: {disc_info.name}")
+                logger.info(f"*** RIP COMPLETED SUCCESSFULLY ***")
                 notify(f"Rip completed: {disc_info.name}")
                 
                 # Count files and size
@@ -218,8 +274,13 @@ class DiscMonitor:
                 self.state_manager.set_error(str(e))
         
         except Exception as e:
-            logger.error(f"Error processing disc: {e}")
+            logger.error("="*60)
+            logger.error(f"CRITICAL ERROR IN _process_disc: {type(e).__name__}: {e}")
+            logger.error("="*60)
+            import traceback
+            logger.error(f"TRACEBACK:\n{traceback.format_exc()}")
             self.state_manager.set_error(str(e))
+            logger.error("Error state saved")
         
         finally:
             # Remove lock file

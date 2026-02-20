@@ -54,24 +54,51 @@ class DiscAnalyzer:
     def get_disc_info(self) -> DiscInfo:
         """Get information about the disc in the drive."""
         device = self.config.devices.primary
+        logger.info(f"="*60)
+        logger.info(f"DISCANALYZER.get_disc_info() STARTED")
+        logger.info(f"="*60)
+        logger.info(f"Device: {device}")
         
         # Check if disc is present
+        logger.info(f"Step 1: Checking if disc is present...")
         if not self._is_disc_present(device):
+            logger.error(f"No disc detected in {device}")
             raise NoDiscError(f"No disc detected in {device}")
+        logger.info(f"✓ Disc is present")
         
         # Get disc info from makemkvcon
+        logger.info(f"Step 2: Getting disc info from makemkvcon...")
         info_output = self._get_makemkv_info(device)
+        logger.info(f"✓ Got info output ({len(info_output)} chars)")
         
         # Parse disc info
+        logger.info(f"Step 3: Extracting disc name...")
         disc_name = self._extract_disc_name(info_output)
+        logger.info(f"✓ Disc name: '{disc_name}'")
+        
+        logger.info(f"Step 4: Extracting titles...")
         titles = self._extract_titles(info_output)
+        logger.info(f"✓ Found {len(titles)} titles")
+        for i, title in enumerate(titles[:5]):  # Log first 5 titles
+            logger.info(f"  Title {i}: index={title.index}, duration={title.duration}s, size={title.size_bytes}B")
+        if len(titles) > 5:
+            logger.info(f"  ... and {len(titles) - 5} more titles")
         
         # Determine content type
+        logger.info(f"Step 5: Detecting content type...")
         content_type, confidence = self._detect_content_type(titles, disc_name)
+        logger.info(f"✓ Content type: {content_type.value} (confidence: {confidence})")
+        
+        sanitized = self._sanitize_name(disc_name)
+        logger.info(f"✓ Sanitized name: '{sanitized}'")
+        
+        logger.info(f"="*60)
+        logger.info(f"DISCANALYZER.get_disc_info() COMPLETED")
+        logger.info(f"="*60)
         
         return DiscInfo(
             name=disc_name,
-            sanitized_name=self._sanitize_name(disc_name),
+            sanitized_name=sanitized,
             content_type=content_type,
             confidence=confidence,
             titles=titles,
@@ -201,8 +228,9 @@ class DiscAnalyzer:
             for t in titles
         ]
         
-        # Use smart detector
+        # Use smart detector with config
         detector = SmartContentDetector(
+            config=self.config,
             min_episode_duration=self.config.detection.min_episode_duration,
             max_episode_duration=self.config.detection.max_episode_duration,
             min_movie_duration=self.config.detection.min_movie_duration
