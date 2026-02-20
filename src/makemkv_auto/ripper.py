@@ -109,7 +109,7 @@ class DiscAnalyzer:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"],
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=60,
             )
             return result.stdout
         except subprocess.TimeoutExpired:
