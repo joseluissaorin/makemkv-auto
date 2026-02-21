@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 from makemkv_auto.config import Config
+from makemkv_auto.disc_db import DiscDatabase
 from makemkv_auto.logger import get_logger
 from makemkv_auto.ripper import DiscAnalyzer, Ripper
 from makemkv_auto.utils.notifications import notify
@@ -27,6 +28,7 @@ class DiscMonitor:
         self.running = False
         self.lock_file = Path("/tmp/makemkv-auto-ripping.lock")
         self.state_manager = StateManager()
+        self.disc_db = DiscDatabase()
     
     def run(self) -> None:
         """Run the monitor loop."""
@@ -124,7 +126,7 @@ class DiscMonitor:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{self.device}"],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=300,
             )
             logger.debug(f"makemkvcon completed with return code: {result.returncode}")
             logger.debug(f"makemkvcon stdout length: {len(result.stdout)} chars")
@@ -171,6 +173,32 @@ class DiscMonitor:
             # Process not running, clean up stale lock
             self.lock_file.unlink(missing_ok=True)
             return False
+    
+    def _get_folder_duration(self, folder: Path) -> int:
+        """Get total duration of all MKV files in folder (in seconds)."""
+        total_duration = 0
+        try:
+            for mkv_file in folder.glob("*.mkv"):
+                # Use ffprobe to get duration if available, otherwise estimate from file size
+                try:
+                    result = subprocess.run(
+                        ["ffprobe", "-v", "error", "-show_entries", "format=duration", 
+                         "-of", "default=noprint_wrappers=1:nokey=1", str(mkv_file)],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if result.returncode == 0:
+                        total_duration += int(float(result.stdout.strip()))
+                except (subprocess.TimeoutExpired, FileNotFoundError):
+                    # ffprobe not available, estimate from file size (rough approximation)
+                    # Assume ~1GB per hour for Blu-ray quality
+                    file_size_gb = mkv_file.stat().st_size / (1024**3)
+                    estimated_duration = int(file_size_gb * 3600)  # 1GB ≈ 1 hour
+                    total_duration += estimated_duration
+        except Exception as e:
+            logger.warning(f"Could not calculate folder duration: {e}")
+        return total_duration
     
     def _process_disc(self) -> None:
         """Process detected disc."""
@@ -221,22 +249,105 @@ class DiscMonitor:
             if disc_info.content_type.value == "tvshow":
                 if self.config.paths.tv_shows is None:
                     raise RuntimeError("TV shows path not configured")
-                output_path = self.config.paths.tv_shows / disc_info.sanitized_name
+                base_output_path = self.config.paths.tv_shows / disc_info.sanitized_name
             else:
                 if self.config.paths.movies is None:
                     raise RuntimeError("Movies path not configured")
-                output_path = self.config.paths.movies / disc_info.sanitized_name
+                base_output_path = self.config.paths.movies / disc_info.sanitized_name
             
-            # Check if already ripped
-            if output_path.exists() and any(output_path.iterdir()):
+            # Check for duplicate or multi-disc scenario
+            output_path = base_output_path
+            disc_already_ripped = False
+            existing_path = None
+            
+            # Check if folder exists and has content
+            if base_output_path.exists() and any(base_output_path.iterdir()):
                 if not self.config.detection.overwrite_existing:
-                    logger.info(f"Already ripped: {output_path}")
-                    notify(f"Disc already ripped: {disc_info.name}")
-                    self.state_manager.complete_rip(str(output_path), 0, 0)
                     
-                    if self.config.detection.auto_eject:
-                        subprocess.run(["eject", self.device])
-                    return
+                    # STRATEGY 1: Check unique disc ID (most reliable)
+                    if disc_info.disc_id and self.disc_db.has_disc(disc_info.disc_id):
+                        existing_disc = self.disc_db.get_disc(disc_info.disc_id)
+                        existing_path = existing_disc.get("output_path") if existing_disc else None
+                        logger.info(f"Duplicate disc detected by ID: {disc_info.disc_id[:30]}...")
+                        logger.info(f"Previously ripped to: {existing_path}")
+                        disc_already_ripped = True
+                    
+                    # STRATEGY 2: For TV shows - ALWAYS auto-number (never skip based on duration)
+                    # TV series discs always get numbered folders
+                    elif disc_info.content_type.value == "tvshow":
+                        logger.info(f"TV show detected - auto-numbering folders")
+                        disc_number = 1
+                        parent_dir = base_output_path.parent
+                        base_name = base_output_path.name
+                        
+                        # If base folder exists, start from Disc 2
+                        if base_output_path.exists() and any(base_output_path.iterdir()):
+                            disc_number = 2
+                        
+                        while True:
+                            if disc_number == 1:
+                                new_name = base_name
+                            else:
+                                new_name = f"{base_name} Disc {disc_number}"
+                            
+                            output_path = parent_dir / new_name
+                            if not output_path.exists() or not any(output_path.iterdir()):
+                                if disc_number > 1:
+                                    logger.info(f"TV series: using '{new_name}'")
+                                break
+                            disc_number += 1
+                            
+                            # Safety limit
+                            if disc_number > 20:
+                                logger.warning("Too many discs detected")
+                                output_path = base_output_path
+                                break
+                    
+                    # STRATEGY 3: For movies - use duration comparison
+                    else:
+                        existing_titles = sum(1 for f in base_output_path.glob("*.mkv"))
+                        existing_duration = self._get_folder_duration(base_output_path)
+                        new_total_duration = sum(t.duration for t in disc_info.titles)
+                        
+                        logger.info(f"Movie check: {existing_titles} files @ {existing_duration//60}min vs {len(disc_info.titles)} titles @ {new_total_duration//60}min")
+                        
+                        # If title count and duration are very similar, it's likely the same disc
+                        duration_diff_pct = abs(existing_duration - new_total_duration) / max(new_total_duration, 1) * 100
+                        titles_match = abs(existing_titles - len(disc_info.titles)) <= 1
+                        
+                        if titles_match and duration_diff_pct < 5:
+                            logger.info(f"Same movie detected (duration diff: {duration_diff_pct:.1f}%) - skipping")
+                            disc_already_ripped = True
+                            existing_path = str(base_output_path)
+                        else:
+                            # Different movie - find next available number
+                            logger.info(f"Different movie detected - auto-numbering")
+                            disc_number = 2
+                            parent_dir = base_output_path.parent
+                            base_name = base_output_path.name
+                            
+                            while True:
+                                new_name = f"{base_name} ({disc_number})"
+                                output_path = parent_dir / new_name
+                                if not output_path.exists() or not any(output_path.iterdir()):
+                                    logger.info(f"Using alternate folder: '{new_name}'")
+                                    break
+                                disc_number += 1
+                                
+                                if disc_number > 20:
+                                    logger.warning("Too many versions detected")
+                                    output_path = base_output_path
+                                    break
+            
+            # Handle already-ripped disc
+            if disc_already_ripped:
+                logger.info(f"Disc already ripped: {existing_path}")
+                notify(f"Disc already ripped: {disc_info.name}")
+                self.state_manager.complete_rip(existing_path or str(base_output_path), 0, 0)
+                
+                if self.config.detection.auto_eject:
+                    subprocess.run(["eject", self.device])
+                return
             
             # Rip disc
             logger.info(f"Starting rip process...")
@@ -264,6 +375,16 @@ class DiscMonitor:
                     file_count=file_count,
                     total_size_mb=total_size / (1024 * 1024)
                 )
+                
+                # Add to disc database for duplicate detection
+                if disc_info.disc_id:
+                    self.disc_db.add_disc(
+                        disc_id=disc_info.disc_id,
+                        disc_name=disc_info.name,
+                        output_path=str(output_path)
+                    )
+                else:
+                    logger.warning(f"No disc ID available for {disc_info.name} - won't be tracked for duplicates")
                 
                 if self.config.detection.auto_eject:
                     subprocess.run(["eject", self.device])

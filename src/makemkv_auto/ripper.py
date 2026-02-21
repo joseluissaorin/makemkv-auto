@@ -43,6 +43,7 @@ class DiscInfo:
     content_type: ContentType
     confidence: str
     titles: list[TitleInfo]
+    disc_id: str | None = None  # Unique disc identifier from CINFO:32
 
 
 class DiscAnalyzer:
@@ -92,6 +93,14 @@ class DiscAnalyzer:
         sanitized = self._sanitize_name(disc_name)
         logger.info(f"✓ Sanitized name: '{sanitized}'")
         
+        # Extract unique disc ID for duplicate detection
+        logger.info(f"Step 6: Extracting unique disc ID...")
+        disc_id = self._extract_disc_id(info_output)
+        if disc_id:
+            logger.info(f"✓ Disc ID: '{disc_id}'")
+        else:
+            logger.info(f"✗ No disc ID found (will use duration fallback)")
+        
         logger.info(f"="*60)
         logger.info(f"DISCANALYZER.get_disc_info() COMPLETED")
         logger.info(f"="*60)
@@ -102,6 +111,7 @@ class DiscAnalyzer:
             content_type=content_type,
             confidence=confidence,
             titles=titles,
+            disc_id=disc_id,
         )
     
     def _is_disc_present(self, device: str) -> bool:
@@ -111,7 +121,7 @@ class DiscAnalyzer:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=300,
             )
             # Check for DRV lines with actual disc data (non-empty name field)
             # DRV:0,2,999,1,"drive_name","disc_name","/dev/sr0"
@@ -136,7 +146,7 @@ class DiscAnalyzer:
                 ["makemkvcon", "-r", "--cache=1", "info", f"dev:{device}"],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=300,
             )
             return result.stdout
         except subprocess.TimeoutExpired:
@@ -159,6 +169,26 @@ class DiscAnalyzer:
             return match.group(1).strip()
         
         return "Unknown_Disc"
+    
+    def _extract_disc_id(self, info_output: str) -> str | None:
+        """Extract unique disc ID from makemkvcon output.
+        
+        CINFO:32 contains the unique disc identifier that differs
+        between discs in a multi-disc set.
+        """
+        # Try CINFO:32 first (unique disc ID)
+        match = re.search(r'^CINFO:32,"([^"]+)"', info_output, re.MULTILINE)
+        if match:
+            disc_id = match.group(1).strip()
+            if disc_id:
+                return disc_id
+        
+        # Fallback to CINFO:0,0 (volume ID)
+        match = re.search(r'^CINFO:0,0,"([^"]+)"', info_output, re.MULTILINE)
+        if match:
+            return match.group(1).strip()
+        
+        return None
     
     def _extract_titles(self, info_output: str) -> list[TitleInfo]:
         """Extract title information from makemkvcon output."""
